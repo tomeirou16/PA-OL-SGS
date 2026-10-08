@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Control de Pañol · SGS</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@300;400;500;600;700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
@@ -1006,53 +1007,79 @@ main {
 <script>
 // ═══ DATA ═══
 
-// ═══ SUPABASE CLIENT ═══
+// ═══ SUPABASE CLIENT (official JS client) ═══
 const SUPA_URL = 'https://jmckmeelrmttuzxfnvxw.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImptY2ttZWVscm10dHV6eGZudnh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzMDg2NTYsImV4cCI6MjEwNjg4NDY1Nn0.InWn2gez2UJuyYQ4ApiRv0LMkgQfY_gWxck84pyMGOU';
 
-async function supaFetch(path, opts={}) {
-  const res = await fetch(SUPA_URL + '/rest/v1/' + path, {
-    headers: {
-      'apikey': SUPA_KEY,
-      'Authorization': 'Bearer ' + SUPA_KEY,
-      'Content-Type': 'application/json',
-      'Prefer': opts.prefer || 'return=minimal',
-      ...opts.headers
-    },
-    method: opts.method || 'GET',
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  if (!res.ok) { const e = await res.text(); console.error('Supabase error:', e); return null; }
-  if (opts.method === 'GET' || opts.prefer === 'return=representation') return res.json();
-  return true;
+// Load Supabase JS client from CDN
+let _supaClient = null;
+function getSupa() {
+  if (!_supaClient) {
+    _supaClient = window.supabase.createClient(SUPA_URL, SUPA_KEY);
+  }
+  return _supaClient;
 }
 
 // DB HELPERS
 const db = {
-  async getTools()     { return supaFetch('herramientas?activo=eq.true&order=sector,name&select=*'); },
-  async getTecnicos()  { return supaFetch('tecnicos?activo=eq.true&select=*'); },
-  async getMovimientos(limit=50) { return supaFetch(`movimientos?order=created_at.desc&limit=${limit}&select=*`); },
+  async getTools() {
+    const { data, error } = await getSupa()
+      .from('herramientas')
+      .select('*')
+      .eq('activo', true)
+      .order('sector').order('name');
+    if (error) { console.error('getTools:', error); return null; }
+    return data;
+  },
+
+  async getTecnicos() {
+    const { data, error } = await getSupa()
+      .from('tecnicos')
+      .select('*')
+      .eq('activo', true);
+    if (error) { console.error('getTecnicos:', error); return null; }
+    return data;
+  },
+
+  async getMovimientos(limit=50) {
+    const { data, error } = await getSupa()
+      .from('movimientos')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) { console.error('getMovimientos:', error); return null; }
+    return data;
+  },
 
   async logMovimiento(data) {
-    return supaFetch('movimientos', { method:'POST', body:data });
+    const { error } = await getSupa().from('movimientos').insert(data);
+    if (error) console.error('logMovimiento:', error);
+    return !error;
   },
 
   async updateToolState(code, patch) {
-    return supaFetch('herramientas?code=eq.' + encodeURIComponent(code), {
-      method: 'PATCH', body: patch
-    });
+    const { error } = await getSupa()
+      .from('herramientas')
+      .update(patch)
+      .eq('code', code);
+    if (error) console.error('updateToolState:', error);
+    return !error;
   },
 
   async updateCalExp(code, calExp, autorizador) {
-    await supaFetch('herramientas?code=eq.' + encodeURIComponent(code), {
-      method: 'PATCH', body: { cal_exp: calExp }
-    });
-    return db.logMovimiento({
-      tipo: 'CALIBRACION',
-      user_nombre: autorizador,
-      herramienta_code: code,
-      notas: 'Calibración actualizada: nueva fecha ' + calExp
-    });
+    const { error } = await getSupa()
+      .from('herramientas')
+      .update({ cal_exp: calExp })
+      .eq('code', code);
+    if (!error) {
+      await db.logMovimiento({
+        tipo: 'CALIBRACION',
+        user_nombre: autorizador,
+        herramienta_code: code,
+        notas: 'Calibración actualizada: nueva fecha ' + calExp
+      });
+    }
+    return !error;
   },
 };
 
